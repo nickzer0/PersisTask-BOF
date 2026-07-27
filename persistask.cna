@@ -1,7 +1,8 @@
 beacon_command_register(
    "persistask",
    "Set scheduled task to launch at logon for persistence. Uses COM object to create task for OPSEC.",
-   "Args: persistask <add / remove> <task name> <command to run>"
+   "Args: persistask <add / remove> <task name> <command to run>",
+   "bof"
 );
 
 
