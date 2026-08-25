@@ -5,7 +5,7 @@ CC_x86 := i686-w64-mingw32-gcc
 
 all:
 	$(CC_x64) -o $(BOFNAME).x64.o $(COMINCLUDE) -Os -c persistask.c -DBOF
-	$(CC_x86) -o $(BOFNAME).x86.o $(COMINCLUDE) -Os -c entry.c -DBOF
+	$(CC_x86) -o $(BOFNAME).x86.o $(COMINCLUDE) -Os -c persistask.c -DBOF
 
 clean:
 	rm $(BOFNAME).*.exe
