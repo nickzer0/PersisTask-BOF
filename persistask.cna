@@ -5,12 +5,10 @@ beacon_command_register(
    "bof"
 );
 
-
-
 alias persistask {
    local('$handle $data $action $command $taskName');
 
-   $handle = openf(script_resource("persistask.x64.o"));
+   $handle = openf(script_resource("persistask." . barch($1) . ".o"));
    $data = readb($handle, -1);
    closef($handle);
 
